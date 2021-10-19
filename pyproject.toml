@@ -2,7 +2,7 @@
 name = "chmigrate"
 version = "0.1.0"
 description = "Utilites make ClickHouse migration"
-authors = ["Vadym Statishyn <v.statishyn@treeum.net>"]
+authors = ["Vadim Statishin <statishin@gmail.com>"]
 license = "BSD-4-Clause"
 readme = "README.md"
 keywords = [
