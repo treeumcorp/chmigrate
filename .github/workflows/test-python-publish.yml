@@ -1,0 +1,28 @@
+name: Upload Python Package (test)
+
+on: [ workflow_dispatch ]
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Fetch tags
+        run: |
+          git fetch --prune --unshallow --tags
+
+      - uses: actions/setup-python@v2
+        with:
+          python-version: "3.10.0"
+
+      - name: Install Poetry
+        run: curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | python - #--version=1.2.0a2
+
+      - run: poetry install
+
+      - run: poetry config repositories.test-pypi https://test.pypi.org/legacy/
+      - run: poetry config pypi-token.test-pypi "${{ secrets.TEST_PYPI_API_TOKEN }}"
+#      - run: poetry plugin add poetry-version-plugin
+
+      - name: Publish package
+        run: poetry publish --build -r test-pypi
