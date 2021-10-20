@@ -1,0 +1,57 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  black-formatting-check:
+    name: Check formatting
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
+#      - uses: psf/black@stable
+
+  build:
+    name: Build tool
+    runs-on: ${{ matrix.os }}
+    needs: black-formatting-check
+
+    strategy:
+      matrix:
+        os:
+          - "ubuntu-latest"
+        python-version:
+          - "3.10.0"
+        poetry-version:
+          - "latest"
+
+    services:
+      clickhouse:
+        image: yandex/clickhouse-server:21.8
+        ports:
+          - "8123:8123"
+          - "9000:9000"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - uses: ./.github/actions/prepare-workspace
+        with:
+          python-version: ${{ matrix.python-version }}
+          poetry-version: ${{ matrix.poetry-version }}
+          os: ${{ matrix.os }}
+
+      - name: Run tests
+        env:
+          TEST_CLICKHOUSE_DSN: "clickhouse://localhost:9000/test_migrate"
+        run: poetry run pytest -v
+
+      - name: Check build artifacts
+        run: poetry build
