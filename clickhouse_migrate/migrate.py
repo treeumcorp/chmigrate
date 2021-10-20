@@ -11,6 +11,8 @@ import asynch
 from asynch.connection import Connection
 from asynch.cursors import DictCursor
 
+from clickhouse_migrate.utils import remove_suffix
+
 
 class MigrationError(Exception):
     message = 'migration error'
@@ -310,7 +312,7 @@ class ClickHouseMigrate:
 
             data[version] = MigrationFiles(
                 version=version,
-                name=f.name.removesuffix('.up.sql'),
+                name=remove_suffix(f.name, '.up.sql'),
                 up=pathlib.Path(f"{self.migration_path}/{f.name}").read_text(),
             )
             data[version].up_md5 = hashlib.md5(data[version].up.encode()).hexdigest()
