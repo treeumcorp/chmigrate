@@ -69,28 +69,46 @@ class MigrationRecord:
 
 
 class ClickHouseMigrate:
-    clickhouse_dsn: str
-    migrations_table: str = 'schema_migrations'
-    migration_path: str = 'migrations'
-
-    _conn = None
+    DEF_MIGRATIONS_PATH: str = 'migrations'
+    DEF_MIGRATIONS_TABLE: str = 'chmigrate'
 
     MULTISTATE_SEPARATOR = ';'
 
-    def __init__(self, *,
-                 clickhouse_dsn: Optional[str] = None,
-                 clickhouse_conn: Optional[Connection] = None,
-                 migrations_path: Optional[str] = None,
-                 migrations_table: Optional[str] = None,
-                 ):
-        if clickhouse_conn:
-            self._conn = clickhouse_conn
-        elif clickhouse_dsn:
-            self.clickhouse_dsn = clickhouse_dsn
+    def __init__(
+        self, *,
+        dsn: Optional[str] = None,
+        connection: Optional[Connection] = None,
+        migrations_path: Optional[str] = None,
+        migrations_table: Optional[str] = None,
+    ):
+        self._connection = None
+        self._connection_dsn = None
+
+        if connection:
+            self._connection = connection
+        elif dsn:
+            self._connection_dsn = dsn
         else:
             raise RuntimeError('clickhouse connection not configure')
-        self.migration_path = migrations_path or self.migration_path
-        self.migrations_table = migrations_table or self.migrations_table
+
+        self._migrations_path = migrations_path or self.DEF_MIGRATIONS_PATH
+        self._migrations_table = migrations_table or self.DEF_MIGRATIONS_TABLE
+
+    @property
+    def connection(self):
+        return self._connection
+
+    @property
+    def connection_dsn(self):
+        return self._connection_dsn
+
+    @property
+    def migrations_path(self):
+        return self._migrations_path
+
+    @property
+    def migrations_table(self):
+        return self._migrations_table
 
     @show_migration_error
     async def make(self, name: str, force: bool = False):
@@ -103,7 +121,7 @@ class ClickHouseMigrate:
             raise MigrationError(f'Version: {pos + 1} not applied')
         for action in ('up', 'down'):
             filename = f'{num:0>5d}_{name}.{action}.sql'
-            pathlib.Path(os.path.join(self.migration_path, filename)).write_text("")
+            pathlib.Path(os.path.join(self._migrations_path, filename)).write_text("")
             print(f'create migration {filename}')
 
     @show_migration_error
@@ -206,7 +224,7 @@ class ClickHouseMigrate:
         print('OK')
 
     async def _log_action(self, *, version, name, status, up_md5, down_md5):
-        await self._execute(f'INSERT INTO {self.migrations_table}(version, name, status, up_md5, down_md5, created_at) VALUES', [{
+        await self._execute(f'INSERT INTO {self._migrations_table}(version, name, status, up_md5, down_md5, created_at) VALUES', [{
             'version': version,
             'name': name,
             'status': status,
@@ -216,25 +234,25 @@ class ClickHouseMigrate:
         }])
 
     async def _check_connect(self):
-        if not self._conn:
-            print(f'Connect to {self.clickhouse_dsn}...', end='')
-            self._conn = await asynch.connect(dsn=self.clickhouse_dsn)
+        if not self._connection:
+            print(f'Connect to {self._connection_dsn}...', end='')
+            self._connection = await asynch.connect(dsn=self._connection_dsn)
             print('OK')
 
     @property
     def _database_name(self):
-        return self._conn.database
+        return self._connection.database
 
     async def _execute(self, query, args=None):
         await self._check_connect()
-        async with self._conn.cursor(cursor=DictCursor) as cursor:
+        async with self._connection.cursor(cursor=DictCursor) as cursor:
             res = await cursor.execute(query, args)
             return res, cursor.fetchall()
 
     async def _check_migration_table(self):
         await self._check_connect()  # init database_name
         print('Migration table exist...', end='')
-        _, res = await self._execute(f"SHOW TABLES FROM {self._database_name} LIKE '{self.migrations_table}'")
+        _, res = await self._execute(f"SHOW TABLES FROM {self._database_name} LIKE '{self._migrations_table}'")
         table_exist = len(res) > 0
         print('OK' if table_exist else 'NOT FOUND')
         return table_exist
@@ -242,7 +260,7 @@ class ClickHouseMigrate:
     async def _create_migration_table(self):
         print('Create migration table...', end='')
         query = f"""
-            CREATE TABLE IF NOT EXISTS {self.migrations_table} (
+            CREATE TABLE IF NOT EXISTS {self._migrations_table} (
                 version UInt32,
                 name String,
                 status String, 
@@ -256,7 +274,7 @@ class ClickHouseMigrate:
     async def db_meta_migrations(self) -> List[MigrationRecord]:
         if not await self._check_migration_table():
             await self._create_migration_table()
-        _, res = await self._execute(f"SELECT version, name, status, up_md5, down_md5, created_at FROM `{self.migrations_table}` ORDER BY (created_at) DESC")
+        _, res = await self._execute(f"SELECT version, name, status, up_md5, down_md5, created_at FROM `{self._migrations_table}` ORDER BY (created_at) DESC")
         return [MigrationRecord(**d) for d in res]
 
     @classmethod
@@ -270,11 +288,11 @@ class ClickHouseMigrate:
 
     @property
     def file_migrations(self) -> Dict[int, MigrationFiles]:
-        if not os.path.exists(self.migration_path):
-            os.makedirs(self.migration_path)
+        if not os.path.exists(self._migrations_path):
+            os.makedirs(self._migrations_path)
 
         data: Dict[int, MigrationFiles] = {}
-        for f in os.scandir(f"{self.migration_path}"):
+        for f in os.scandir(f"{self._migrations_path}"):
             if not f.name.endswith('.up.sql'):
                 continue
             version = int(f.name.split('_', 1)[0])
@@ -282,17 +300,17 @@ class ClickHouseMigrate:
             data[version] = MigrationFiles(
                 version=version,
                 name=f.name.removesuffix('.up.sql'),
-                up=pathlib.Path(f"{self.migration_path}/{f.name}").read_text(),
+                up=pathlib.Path(f"{self._migrations_path}/{f.name}").read_text(),
             )
             data[version].up_md5 = hashlib.md5(data[version].up.encode()).hexdigest()
 
-        for f in os.scandir(f"{self.migration_path}"):
+        for f in os.scandir(f"{self._migrations_path}"):
             if not f.name.endswith('.down.sql'):
                 continue
             version = int(f.name.split('_', 1)[0])
             if version not in data:
                 raise MigrationError(f'Version: {version} - not found up migration file')
-            data[version].down = pathlib.Path(f"{self.migration_path}/{f.name}").read_text()
+            data[version].down = pathlib.Path(f"{self._migrations_path}/{f.name}").read_text()
             data[version].down_md5 = hashlib.md5(data[version].down.encode()).hexdigest()
 
         keys = list(data.keys())

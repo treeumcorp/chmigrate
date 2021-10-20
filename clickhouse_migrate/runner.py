@@ -14,7 +14,7 @@ def check_positive_int(value):
 
 async def _run():
     m = ClickHouseMigrate(
-        clickhouse_dsn=os.environ.get('CLICKHOUSE_DSN', 'clickhouse://localhost:9005/dbmigrate'),
+        dsn=os.environ.get('CLICKHOUSE_DSN', 'clickhouse://localhost:9005/dbmigrate'),
         migrations_path=os.environ.get('MIGRATION_PATH', 'migrations'),
         migrations_table=os.environ.get('MIGRATIONS_TABLE', 'schema_migrations'),
     )
