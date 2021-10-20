@@ -8,6 +8,8 @@ __pycache__
 .python-version
 dist/
 
+.env
+
 # Unit test / coverage reports
 .pytest_cache/
 .coverage

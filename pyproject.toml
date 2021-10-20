@@ -26,6 +26,7 @@ chmigrate = 'clickhouse_migrate.runner:run'
 [tool.poetry.dependencies]
 python = "^3.10"
 asynch = ">=0.1.9"
+python-dotenv = "^0.19.1"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.5"
