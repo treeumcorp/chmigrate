@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 import asynch
 import pytest
 
-clickhouse_dsn = os.environ.get('TEST_CLICKHOUSE_DSN', 'clickhouse://localhost:9005/test_migrate')
+clickhouse_dsn = os.environ.get('TEST_CLICKHOUSE_DSN', 'clickhouse://localhost:9000/test_migrate')
 
 
 @pytest.fixture(scope='function')
