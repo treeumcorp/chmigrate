@@ -2,6 +2,8 @@ import argparse
 import asyncio
 import os
 
+from dotenv import dotenv_values
+
 from clickhouse_migrate.migrate import ClickHouseMigrate
 
 
@@ -13,17 +15,18 @@ def check_positive_int(value):
 
 
 async def _run():
-    m = ClickHouseMigrate(
-        clickhouse_dsn=os.environ.get('CLICKHOUSE_DSN', 'clickhouse://localhost:9005/dbmigrate'),
-        migrations_path=os.environ.get('MIGRATION_PATH', 'migrations'),
-        migrations_table=os.environ.get('MIGRATIONS_TABLE', 'schema_migrations'),
-    )
-
     parser = argparse.ArgumentParser('ClickHouse migrate')
+    parser.add_argument('--env', type=str, default='.env', help='environment variables (default: .env)')
+    parser.add_argument('--dsn', type=str, default='clickhouse://localhost:9000/database',
+                        help='clickhouse dsn (default: clickhouse://localhost:9000/database)')
+    parser.add_argument('--migration-path', type=str, default='migrations', help='migration path (default: migrations)')
+    parser.add_argument('--migration-table', type=str, default='schema_migrations',
+                        help='migration table (default: schema_migrations)')
+
     subparsers = parser.add_subparsers(dest='subparser_name')
 
     parser_make = subparsers.add_parser('make', help='make new migration')
-    parser_make.add_argument('name', type=str, nargs='?', default='new', help='migration name')
+    parser_make.add_argument('name', type=str, nargs='?', default='new', help='migration name (default: new)')
     parser_make.add_argument('--force', action='store_true', help='force make migration files')
 
     subparsers.add_parser('show', help='show migrations')
@@ -39,6 +42,17 @@ async def _run():
     subparsers.add_parser('reset', help='reset last dirty migration')
 
     args = parser.parse_args()
+
+    environ = {
+        **os.environ,
+        **dotenv_values(args.env),
+    }
+    m = ClickHouseMigrate(
+        clickhouse_dsn=os.environ.get('CLICKHOUSE_DSN', args.dsn),
+        migrations_path=os.environ.get('MIGRATION_PATH', args.migration_path),
+        migrations_table=os.environ.get('MIGRATIONS_TABLE', args.migration_table),
+        environ=environ,
+    )
 
     if args.subparser_name == 'show':
         await m.show()

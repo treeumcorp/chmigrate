@@ -4,12 +4,16 @@ import pathlib
 import pytest
 from asynch.cursors import Cursor, DictCursor
 
-from clickhouse_migrate import __version__
 from clickhouse_migrate.migrate import ClickHouseMigrate, MigrationError, Status, MigrationRecord
 
 
-def test_version():
-    assert __version__ == '0.1.0'
+@pytest.mark.asyncio
+async def test_show(clickhouse_conn, migration_path):
+    m = ClickHouseMigrate(
+        clickhouse_conn=clickhouse_conn,
+        migrations_path=migration_path,
+    )
+    await m.show()
 
 
 @pytest.mark.asyncio
@@ -44,7 +48,7 @@ async def test_migrate_up_down(clickhouse_conn, migration_path):
     name = 'new_test_migration'
     for num in range(0, 5):
         pathlib.Path(os.path.join(migration_path, f'{num+1:0>5d}_{name}.up.sql')).write_text(
-            f'CREATE TABLE Table{num+1} (id UInt32) Engine=MergeTree ORDER BY (id)'
+            f'CREATE TABLE Table{num+1} (id UInt32) Engine=MergeTree ORDER BY (id);'
         )
         pathlib.Path(os.path.join(migration_path, f'{num+1:0>5d}_{name}.down.sql')).write_text(
             f'DROP TABLE Table{num+1};'
@@ -70,7 +74,10 @@ async def test_migrate_up_down(clickhouse_conn, migration_path):
 
 async def get_last_log(m):
     async with m._conn.cursor(cursor=DictCursor) as cursor:
-        await cursor.execute(f'SELECT version, name, status, up_md5, down_md5, created_at FROM `{m.migrations_table}` ORDER BY (created_at) DESC LIMIT 1')
+        await cursor.execute(
+            f"""SELECT version, name, status, up_md5, down_md5, created_at 
+                FROM `{m.migrations_table}` ORDER BY (created_at) DESC LIMIT 1"""
+        )
         res = cursor.fetchone()
         return MigrationRecord(**res)
 
@@ -208,4 +215,17 @@ async def test_migrate_reset(clickhouse_conn, migration_path):
     mig3 = await get_last_log(m)
     assert mig3.version == mig1.version-1
     assert mig3.status == Status.UP
+
+
+def test_usage_environ_variable(clickhouse_conn, migration_path):
+    environ = {
+        'TEST_VAR1': 'Table1',
+    }
+    m = ClickHouseMigrate(
+        clickhouse_conn=clickhouse_conn,
+        migrations_path=migration_path,
+        environ=environ,
+    )
+    result = m._render('CREATE TABLE {TEST_VAR1};')
+    assert environ['TEST_VAR1'] in result
 
