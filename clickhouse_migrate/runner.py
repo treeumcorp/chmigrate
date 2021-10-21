@@ -16,11 +16,21 @@ def check_positive_int(value):
 
 async def _run():
     parser = argparse.ArgumentParser('ClickHouse migrate')
-    parser.add_argument('--env', type=str, default='.env', help='environment variables (default: .env)')
-    parser.add_argument('--dsn', type=str, default='clickhouse://localhost:9000/database',
+    parser.add_argument('--env',
+                        type=str,
+                        default='.env',
+                        help='environment variables (default: .env)')
+    parser.add_argument('--dsn',
+                        type=str,
+                        default=os.environ.get('CLICKHOUSE_DSN', 'clickhouse://localhost:9000/database'),
                         help='clickhouse dsn (default: clickhouse://localhost:9000/database)')
-    parser.add_argument('--migration-path', type=str, default='migrations', help='migration path (default: migrations)')
-    parser.add_argument('--migration-table', type=str, default='schema_migrations',
+    parser.add_argument('--migration-path',
+                        type=str,
+                        default=os.environ.get('MIGRATION_PATH', 'migrations'),
+                        help='migration path (default: migrations)')
+    parser.add_argument('--migration-table',
+                        type=str,
+                        default=os.environ.get('MIGRATIONS_TABLE', 'schema_migrations'),
                         help='migration table (default: schema_migrations)')
 
     subparsers = parser.add_subparsers(dest='subparser_name')
@@ -48,9 +58,9 @@ async def _run():
         **dotenv_values(args.env),
     }
     m = ClickHouseMigrate(
-        clickhouse_dsn=os.environ.get('CLICKHOUSE_DSN', args.dsn),
-        migrations_path=os.environ.get('MIGRATION_PATH', args.migration_path),
-        migrations_table=os.environ.get('MIGRATIONS_TABLE', args.migration_table),
+        clickhouse_dsn=args.dsn,
+        migrations_path=args.migration_path,
+        migrations_table=args.migration_table,
         environ=environ,
     )
 
