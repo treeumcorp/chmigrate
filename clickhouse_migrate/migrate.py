@@ -142,7 +142,10 @@ class ClickHouseMigrate:
         print('-'*102)
         version = self.position(db_meta_migrations)
         if version > 0:
-            print(f'Current apply position version: {file_migrations[version].version} - {file_migrations[version].name}')
+            print(f'Current apply position version: '
+                  f'{file_migrations[version].version} - '
+                  f'{file_migrations[version].name}: '
+                  f'{db_meta_migrations[0].status}')
 
     @show_migration_error
     async def force(self, reset=False):
@@ -174,7 +177,9 @@ class ClickHouseMigrate:
     async def up(self, *, step: Optional[int] = None):
         file_migrations = self.file_migrations
         step = step or len(file_migrations)
-        pos = self.position(await self.db_meta_migrations())
+        migrations = await self.db_meta_migrations()
+        self._check_current_migration(migrations)
+        pos = self.position(migrations)
         play_migration = sorted([k for k in file_migrations.keys() if pos < k <= pos + step])
         for version in play_migration:
             f = file_migrations[version]
@@ -184,11 +189,18 @@ class ClickHouseMigrate:
     async def down(self, *, step: Optional[int] = None):
         file_migrations = self.file_migrations
         step = step or len(file_migrations)
-        pos = self.position(await self.db_meta_migrations())
+        migrations = await self.db_meta_migrations()
+        self._check_current_migration(migrations)
+        pos = self.position(migrations)
         play_migration = reversed(sorted([k for k in file_migrations.keys() if pos-step < k <= pos]))
         for version in play_migration:
             f = file_migrations[version]
             await self._apply_migrate(f, Action.DOWN)
+
+    @classmethod
+    def _check_current_migration(cls, migrations: List[MigrationRecord]):
+        if len(migrations) > 0 and migrations[0].status in [Status.DIRTY_UP, Status.DIRTY_DOWN]:
+            raise MigrationError(f'Current migration {migrations[-1].status}')
 
     async def _apply_migrate(self, meta: MigrationFiles, action: Action):
         print(f'Migrate {action.name} {meta.name}...', end='')
@@ -293,10 +305,10 @@ class ClickHouseMigrate:
     @classmethod
     def position(cls, db_meta_migrations: List[MigrationRecord]) -> int:
         for m in db_meta_migrations:
-            if m.status == Status.UP:
-                return m.version
-            elif m.status == Status.DIRTY_DOWN:
+            if m.status == Status.DOWN:
                 return m.version - 1
+            else:
+                return m.version
         return 0
 
     @property
