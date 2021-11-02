@@ -8,6 +8,48 @@ from clickhouse_migrate.migrate import ClickHouseMigrate, MigrationError, Status
 
 
 @pytest.mark.asyncio
+async def test_without_connection(migration_path):
+    with pytest.raises(RuntimeError):
+        ClickHouseMigrate(
+            migrations_path=migration_path,
+        )
+
+
+@pytest.mark.asyncio
+async def test_already_created_connection(clickhouse_conn, migration_path):
+    m = ClickHouseMigrate(
+        clickhouse_conn=clickhouse_conn,
+        migrations_path=migration_path,
+    )
+    conn = await m.conn()
+    assert conn.connected
+
+
+@pytest.mark.asyncio
+async def test_connect_with_dsn(clickhouse_dsn, migration_path):
+    m = ClickHouseMigrate(
+        clickhouse_dsn=clickhouse_dsn,
+        migrations_path=migration_path,
+    )
+    conn = await m.conn()
+    assert conn.connected
+
+
+@pytest.mark.asyncio
+async def test_connect_with_conn_info(clickhouse_conn_info, migration_path):
+    m = ClickHouseMigrate(
+        host=clickhouse_conn_info.HOST,
+        port=clickhouse_conn_info.PORT,
+        username=clickhouse_conn_info.USERNAME,
+        password=clickhouse_conn_info.PASSWORD,
+        database=clickhouse_conn_info.DATABASE,
+        migrations_path=migration_path,
+    )
+    conn = await m.conn()
+    assert conn.connected
+
+
+@pytest.mark.asyncio
 async def test_show(clickhouse_conn, migration_path):
     m = ClickHouseMigrate(
         clickhouse_conn=clickhouse_conn,

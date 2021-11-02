@@ -23,15 +23,36 @@ async def _run():
     parser.add_argument('--dsn',
                         type=str,
                         default=os.environ.get('CLICKHOUSE_DSN', 'clickhouse://localhost:9000/database'),
-                        help='clickhouse dsn (default: clickhouse://localhost:9000/database)')
+                        help='clickhouse dsn. Env: CLICKHOUSE_DSN (default: clickhouse://localhost:9000/database)')
+    parser.add_argument('--host',
+                        type=str,
+                        default=os.environ.get('CLICKHOUSE_HOST', 'localhost'),
+                        help='clickhouse host. Env: CLICKHOUSE_HOST (default: localhost)')
+    parser.add_argument('--port',
+                        type=int,
+                        default=os.environ.get('CLICKHOUSE_PORT', 9000),
+                        help='clickhouse port. Env: CLICKHOUSE_PORT (default: 9000)')
+    parser.add_argument('--username',
+                        type=str,
+                        default=os.environ.get('CLICKHOUSE_USER', 'default'),
+                        help='clickhouse user. Env: CLICKHOUSE_USER (default: "default")')
+    parser.add_argument('--password',
+                        type=str,
+                        default=os.environ.get('CLICKHOUSE_PASSWORD', ''),
+                        help='clickhouse password. Env: CLICKHOUSE_USER (default: "")')
+    parser.add_argument('--database',
+                        type=str,
+                        default=os.environ.get('CLICKHOUSE_DATABASE', ''),
+                        help='clickhouse database. Env: CLICKHOUSE_DATABASE (default: "")')
     parser.add_argument('--migration-path',
                         type=str,
                         default=os.environ.get('MIGRATION_PATH', 'migrations'),
-                        help='migration path (default: migrations)')
+                        help='migration path. Env: MIGRATION_PATH (default: migrations)')
     parser.add_argument('--migration-table',
                         type=str,
                         default=os.environ.get('MIGRATIONS_TABLE', 'schema_migrations'),
-                        help='migration table (default: schema_migrations)')
+                        help='migration table. Env: MIGRATIONS_TABLE (default: schema_migrations)')
+    parser.add_argument('--verbose', action='store_true', help='Verbose output')
 
     subparsers = parser.add_subparsers(dest='subparser_name')
 
@@ -59,9 +80,15 @@ async def _run():
     }
     m = ClickHouseMigrate(
         clickhouse_dsn=args.dsn,
+        host=args.host,
+        port=args.port,
+        username=args.username,
+        password=args.password,
+        database=args.database,
         migrations_path=args.migration_path,
         migrations_table=args.migration_table,
         environ=environ,
+        verbose=args.verbose,
     )
 
     if args.subparser_name == 'show':
