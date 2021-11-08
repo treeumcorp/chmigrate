@@ -1,7 +1,7 @@
 import datetime
 import hashlib
 import os
-import pathlib
+from pathlib import Path
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, List, Dict, Any
@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 import asynch
 from asynch.connection import Connection
 from asynch.cursors import DictCursor
+from jinja2 import Environment, FileSystemLoader
 
 from clickhouse_migrate.utils import remove_suffix
 
@@ -63,8 +64,10 @@ class MigrationFiles:
     name: str
     up: Optional[str] = None
     up_md5: Optional[str] = None
+    up_filename: Optional[str] = None
     down: Optional[str] = None
     down_md5: Optional[str] = None
+    down_filename: Optional[str] = None
 
 
 @dataclass
@@ -128,6 +131,9 @@ class ClickHouseMigrate:
             raise RuntimeError("clickhouse connection not configure")
         self.migration_path = migrations_path or self.migration_path
         self.migrations_table = migrations_table or self.migrations_table
+        self.jinja_env = Environment(
+            loader=FileSystemLoader(self.migration_path),
+        )
         self.environ = environ or {}
 
     def _parse_conn(self):
@@ -166,7 +172,7 @@ class ClickHouseMigrate:
             raise MigrationError(f"Version: {pos + 1} not applied")
         for action in ("up", "down"):
             filename = f"{num:0>5d}_{name}.{action}.sql"
-            pathlib.Path(os.path.join(self.migration_path, filename)).write_text("")
+            Path(os.path.join(self.migration_path, filename)).write_text("")
             self._print(f"create migration {filename}")
 
     @show_migration_error
@@ -280,14 +286,17 @@ class ClickHouseMigrate:
             up_md5=meta.up_md5,
             down_md5=meta.down_md5,
         )
-        scripts = meta.up if action == Action.UP else meta.down
+        scripts = (
+            self._render(meta.up_filename)
+            if action == Action.UP
+            else self._render(meta.down_filename)
+        )
         scripts = [
             c
             for c in [s.strip() for s in scripts.split(self.MULTISTATE_SEPARATOR)]
             if c
         ]
         for query in scripts:
-            query = self._render(query)
             await self._execute(query)
         await self._log_action(
             version=meta.version,
@@ -298,8 +307,9 @@ class ClickHouseMigrate:
         )
         self._print("OK")
 
-    def _render(self, query: str) -> str:
-        return query.format(**self.environ)
+    def _render(self, filename: str) -> str:
+        template = self.jinja_env.get_template(filename)
+        return template.render(**self.environ)
 
     async def _log_action(self, *, version, name, status, up_md5, down_md5):
         await self._execute(
@@ -400,31 +410,33 @@ class ClickHouseMigrate:
 
         data: Dict[int, MigrationFiles] = {}
         for f in os.scandir(f"{self.migration_path}"):
-            if not f.name.endswith(".up.sql"):
+            filename = f.name
+            if not filename.endswith(".up.sql"):
                 continue
-            version = int(f.name.split("_", 1)[0])
+            version = int(filename.split("_", 1)[0])
 
             data[version] = MigrationFiles(
                 version=version,
-                name=remove_suffix(f.name, ".up.sql"),
-                up=pathlib.Path(f"{self.migration_path}/{f.name}").read_text(),
+                name=remove_suffix(filename, ".up.sql"),
+                up=Path(f"{self.migration_path}/{filename}").read_text(),
+                up_filename=filename,
             )
             data[version].up_md5 = hashlib.md5(data[version].up.encode()).hexdigest()
 
         for f in os.scandir(f"{self.migration_path}"):
-            if not f.name.endswith(".down.sql"):
+            filename = f.name
+            if not filename.endswith(".down.sql"):
                 continue
-            version = int(f.name.split("_", 1)[0])
+            version = int(filename.split("_", 1)[0])
             if version not in data:
                 raise MigrationError(
                     f"Version: {version} - not found up migration file"
                 )
-            data[version].down = pathlib.Path(
-                f"{self.migration_path}/{f.name}"
-            ).read_text()
+            data[version].down = Path(f"{self.migration_path}/{filename}").read_text()
             data[version].down_md5 = hashlib.md5(
                 data[version].down.encode()
             ).hexdigest()
+            data[version].down_filename = filename
 
         keys = list(data.keys())
         keys = sorted(keys)

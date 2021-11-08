@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "chmigrate"
-version = "0.2.1"
+version = "0.3.0"
 description = "Utilites make ClickHouse migration"
 authors = ["Vadim Statishin <statishin@gmail.com>"]
 license = "BSD-4-Clause"
@@ -27,6 +27,7 @@ chmigrate = 'clickhouse_migrate.runner:run'
 python = "^3.8"
 asynch = ">=0.1.9"
 python-dotenv = "^0.19.1"
+Jinja2 = "^3.0.2"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.5"
