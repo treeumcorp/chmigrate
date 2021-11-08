@@ -4,7 +4,7 @@ import os
 
 from dotenv import dotenv_values
 
-from clickhouse_migrate.migrate import ClickHouseMigrate
+from clickhouse_migrate.migrate import ClickHouseMigrate, Action
 
 
 def check_positive_int(value):
@@ -83,6 +83,12 @@ async def _run():
 
     subparsers.add_parser("show", help="show migrations")
 
+    show_sql = subparsers.add_parser(
+        "show_sql", help="show DDL migrations after parse template engine"
+    )
+    show_sql.add_argument("step", type=check_positive_int, help="migration step")
+    show_sql.add_argument("direction", type=str, help="up|down")
+
     parser_up = subparsers.add_parser("up", help="migrate up")
     parser_up.add_argument(
         "step", type=check_positive_int, nargs="?", help="migration step"
@@ -118,6 +124,10 @@ async def _run():
 
     if args.subparser_name == "show":
         await m.show()
+    elif args.subparser_name == "show_sql":
+        await m.show_sql(
+            args.step, Action.DOWN if args.direction.lower() == "down" else Action.UP
+        )
     elif args.subparser_name == "make":
         await m.make(args.name, args.force)
     elif args.subparser_name == "up":
