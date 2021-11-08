@@ -274,14 +274,47 @@ async def test_migrate_reset(clickhouse_conn, migration_path):
     assert mig3.status == Status.UP
 
 
-def test_usage_environ_variable(clickhouse_conn, migration_path):
+ddl_replcated = """
+        CREATE TABLE Table1 
+        {% if CLUSTER_NAME %} 
+            ON CLUSTER {{CLUSTER_NAME}}
+        {% endif %}
+            (x UInt32)
+        {% if CLUSTER_NAME %} 
+            ReplicatedMergeTree('/clickhouse/tables/{shard}/{database}/table_name', '{replica}')
+        {% else %}
+            ENGINE = MergeTree
+        {% endif %}
+        ORDER BY x;
+        """
+
+
+def test_usage_cluster(clickhouse_conn, migration_path):
     environ = {
-        "TEST_VAR1": "Table1",
+        "CLUSTER_NAME": "my_cluster",
     }
     m = ClickHouseMigrate(
         clickhouse_conn=clickhouse_conn,
         migrations_path=migration_path,
         environ=environ,
     )
-    result = m._render("CREATE TABLE {TEST_VAR1};")
-    assert environ["TEST_VAR1"] in result
+    filename = "test_env.up.sql"
+    with open(os.path.join(migration_path, filename), "wt") as f:
+        f.write(ddl_replcated)
+    result = m._render(filename)
+    assert environ["CLUSTER_NAME"] in result
+    assert "ON CLUSTER" in result
+    assert "ReplicatedMergeTree" in result
+
+
+def test_usage_wo_cluster(clickhouse_conn, migration_path):
+    m = ClickHouseMigrate(
+        clickhouse_conn=clickhouse_conn,
+        migrations_path=migration_path,
+    )
+    filename = "test_env.up.sql"
+    with open(os.path.join(migration_path, filename), "wt") as f:
+        f.write(ddl_replcated)
+    result = m._render(filename)
+    assert "ON CLUSTER" not in result
+    assert "ReplicatedMergeTree" not in result
