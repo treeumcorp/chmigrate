@@ -215,6 +215,17 @@ class ClickHouseMigrate:
                 f"{db_meta_migrations[0].status}"
             )
 
+    async def show_sql(self, step: int, action: Action = Action.UP):
+        file_migrations = self.file_migrations
+        if len(file_migrations) < step:
+            print("migration not found")
+        scripts = (
+            self._render(file_migrations[step - 1].up_filename)
+            if action == Action.UP
+            else self._render(file_migrations[step - 1].down_filename)
+        )
+        print(scripts)
+
     @show_migration_error
     async def force(self, reset=False):
         meta = await self.db_meta_migrations()
