@@ -14,15 +14,34 @@ def check_positive_int(value):
     return val
 
 
-def _load_environment():
-    parser = argparse.ArgumentParser()
+def _add_known_args(parser):
     parser.add_argument(
         "--env", type=str, default=".env", help="environment variables (default: .env)"
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--prefix",
+        type=str,
+        default="",
+        help="environment variables prefix (default: none)",
+    )
+
+
+def _load_environment():
+    parser = argparse.ArgumentParser()
+    _add_known_args(parser)
+    args, extra = parser.parse_known_args()
+
+    env_file = dotenv_values(args.env)
+    if args.prefix:
+        env_file = {
+            k[len(args.prefix) :]: v
+            for k, v in env_file.items()
+            if k.startswith(args.prefix)
+        }
+
     return {
         **os.environ,
-        **dotenv_values(args.env),
+        **env_file,
     }
 
 
@@ -30,14 +49,13 @@ async def _run():
     environ = _load_environment()
 
     parser = argparse.ArgumentParser("chmigrate")
-    parser.add_argument(
-        "--env", type=str, default=".env", help="environment variables (default: .env)"
-    )
+    _add_known_args(parser)
+
     parser.add_argument(
         "--dsn",
         type=str,
-        default=environ.get("CLICKHOUSE_DSN", "clickhouse://localhost:9000/database"),
-        help="clickhouse dsn. Env: CLICKHOUSE_DSN (default: clickhouse://localhost:9000/database)",
+        default=environ.get("CLICKHOUSE_DSN", ""),
+        help="clickhouse dsn. Env: CLICKHOUSE_DSN (default: none",
     )
     parser.add_argument(
         "--host",
