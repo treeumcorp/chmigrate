@@ -26,27 +26,27 @@ def _add_known_args(parser):
     )
 
 
-def _load_environment():
+ENV_PREFIX = ""
+
+
+def _load_environment_from_file():
     parser = argparse.ArgumentParser()
     _add_known_args(parser)
     args, extra = parser.parse_known_args()
 
-    env_file = dotenv_values(args.env)
-    if args.prefix:
-        env_file = {
-            k[len(args.prefix) :]: v
-            for k, v in env_file.items()
-            if k.startswith(args.prefix)
-        }
+    global ENV_PREFIX
+    ENV_PREFIX = args.prefix
 
-    return {
-        **os.environ,
-        **env_file,
-    }
+    env_file = dotenv_values(args.env)
+    os.environ.update(env_file)
+
+
+def get_env(name, default=""):
+    return os.environ.get(ENV_PREFIX + name, default=default)
 
 
 async def _run():
-    environ = _load_environment()
+    _load_environment_from_file()
 
     parser = argparse.ArgumentParser("chmigrate")
     _add_known_args(parser)
@@ -54,49 +54,49 @@ async def _run():
     parser.add_argument(
         "--dsn",
         type=str,
-        default=environ.get("CLICKHOUSE_DSN", ""),
+        default=get_env("CLICKHOUSE_DSN", ""),
         help="clickhouse dsn. Env: CLICKHOUSE_DSN (default: none",
     )
     parser.add_argument(
         "--host",
         type=str,
-        default=environ.get("CLICKHOUSE_HOST", "localhost"),
+        default=get_env("CLICKHOUSE_HOST", "localhost"),
         help="clickhouse host. Env: CLICKHOUSE_HOST (default: localhost)",
     )
     parser.add_argument(
         "--port",
         type=int,
-        default=environ.get("CLICKHOUSE_PORT", 9000),
+        default=get_env("CLICKHOUSE_PORT", 9000),
         help="clickhouse port. Env: CLICKHOUSE_PORT (default: 9000)",
     )
     parser.add_argument(
         "--username",
         type=str,
-        default=environ.get("CLICKHOUSE_USER", "default"),
+        default=get_env("CLICKHOUSE_USER", "default"),
         help='clickhouse user. Env: CLICKHOUSE_USER (default: "default")',
     )
     parser.add_argument(
         "--password",
         type=str,
-        default=environ.get("CLICKHOUSE_PASSWORD", ""),
+        default=get_env("CLICKHOUSE_PASSWORD", ""),
         help='clickhouse password. Env: CLICKHOUSE_USER (default: "")',
     )
     parser.add_argument(
         "--database",
         type=str,
-        default=environ.get("CLICKHOUSE_DATABASE", ""),
+        default=get_env("CLICKHOUSE_DATABASE", ""),
         help='clickhouse database. Env: CLICKHOUSE_DATABASE (default: "")',
     )
     parser.add_argument(
         "--migration-path",
         type=str,
-        default=environ.get("MIGRATION_PATH", "migrations"),
+        default=get_env("MIGRATION_PATH", "migrations"),
         help="migration path. Env: MIGRATION_PATH (default: migrations)",
     )
     parser.add_argument(
         "--migration-table",
         type=str,
-        default=environ.get("MIGRATIONS_TABLE", "schema_migrations"),
+        default=get_env("MIGRATIONS_TABLE", "schema_migrations"),
         help="migration table. Env: MIGRATIONS_TABLE (default: schema_migrations)",
     )
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
@@ -144,7 +144,7 @@ async def _run():
         database=args.database,
         migrations_path=args.migration_path,
         migrations_table=args.migration_table,
-        environ=environ,
+        environ={**os.environ},
         verbose=args.verbose,
     )
 
