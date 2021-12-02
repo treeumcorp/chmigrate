@@ -72,8 +72,9 @@ async def _run():
     parser.add_argument(
         "--username",
         type=str,
-        default=get_env("CLICKHOUSE_USER", "default"),
-        help='clickhouse user. Env: CLICKHOUSE_USER (default: "default")',
+        default=get_env("CLICKHOUSE_USERNAME", "")
+        or get_env("CLICKHOUSE_USER", "default"),
+        help='clickhouse user. Env: CLICKHOUSE_USERNAME (default: "default")',
     )
     parser.add_argument(
         "--password",
@@ -86,6 +87,18 @@ async def _run():
         type=str,
         default=get_env("CLICKHOUSE_DATABASE", ""),
         help='clickhouse database. Env: CLICKHOUSE_DATABASE (default: "")',
+    )
+    parser.add_argument(
+        "--secure",
+        type=str,
+        default=get_env("CLICKHOUSE_SECURE", "false"),
+        help='clickhouse secure connection. Env: CLICKHOUSE_SECURE (default: "false")',
+    )
+    parser.add_argument(
+        "--ca-certs",
+        type=str,
+        default=get_env("CLICKHOUSE_CA_CERTS", ""),
+        help='clickhouse CA certificate connection. Env: CLICKHOUSE_CA_CERTS (default: "")',
     )
     parser.add_argument(
         "--migration-path",
@@ -146,6 +159,8 @@ async def _run():
         migrations_table=args.migration_table,
         environ={**os.environ},
         verbose=args.verbose,
+        secure=args.secure.lower() == "true",
+        ca_certs=args.ca_certs,
     )
 
     if args.subparser_name == "show":
@@ -166,6 +181,8 @@ async def _run():
         await m.force(reset=True)
     else:
         parser.print_help()
+
+    await m.close()
 
 
 def run():

@@ -112,6 +112,8 @@ class ClickHouseMigrate:
         migrations_table: Optional[str] = None,
         environ: Optional[Dict[str, Any]] = None,
         verbose: bool = False,
+        secure: bool = False,
+        ca_certs: str = "",
     ):
         if verbose:
             self.verbose_level = VerboseLevel.DEBUG
@@ -129,12 +131,18 @@ class ClickHouseMigrate:
             self.password = password
         else:
             raise RuntimeError("clickhouse connection not configure")
+        self.secure = secure
+        self.ca_certs = ca_certs
         self.migration_path = migrations_path or self.migration_path
         self.migrations_table = migrations_table or self.migrations_table
         self.jinja_env = Environment(
             loader=FileSystemLoader(self.migration_path),
         )
         self.environ = environ or {}
+
+    async def close(self):
+        if self._conn:
+            await self._conn.close()
 
     def _parse_conn(self):
         if self._conn:
@@ -342,10 +350,15 @@ class ClickHouseMigrate:
     async def _check_database_exist(self):
         self._print("Check database exists")
         conn = await asynch.connect(
-            host=self.host, port=self.port, user=self.username, password=self.password
+            host=self.host,
+            port=self.port,
+            user=self.username,
+            password=self.password,
+            secure=self.secure,
+            ca_certs=self.ca_certs,
         )
         async with conn.cursor() as cursor:
-            await cursor.execute(f"CREATE DATABASE IF NOT EXISTS {self.database}")
+            await cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{self.database}`")
         await conn.close()
 
     async def conn(self):
@@ -363,6 +376,8 @@ class ClickHouseMigrate:
                     user=self.username,
                     password=self.password,
                     database=self.database,
+                    secure=self.secure,
+                    ca_certs=self.ca_certs,
                 )
                 self._debug("OK")
         return self._conn
@@ -376,7 +391,7 @@ class ClickHouseMigrate:
     async def _check_migration_table(self):
         self._print("Migration table exist...", end="")
         _, res = await self._execute(
-            f"SHOW TABLES FROM {self.database} LIKE '{self.migrations_table}'"
+            f"SHOW TABLES FROM `{self.database}` LIKE '{self.migrations_table}'"
         )
         table_exist = len(res) > 0
         self._print("OK" if table_exist else "NOT FOUND")
