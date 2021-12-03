@@ -1,6 +1,8 @@
 import os.path
 import pathlib
+from urllib.parse import urlparse
 
+import asynch
 import pytest
 from asynch.cursors import Cursor, DictCursor
 
@@ -26,18 +28,26 @@ async def test_already_created_connection(clickhouse_conn, migration_path):
         clickhouse_conn=clickhouse_conn,
         migrations_path=migration_path,
     )
-    conn = await m.conn()
-    assert conn.connected
+    assert clickhouse_conn.host == m.connection_params["host"]
+    assert clickhouse_conn.port == m.connection_params["port"]
+    assert clickhouse_conn.user == m.connection_params["user"]
+    assert clickhouse_conn.password == m.connection_params["password"]
+    assert clickhouse_conn.database == m.database
 
 
 @pytest.mark.asyncio
-async def test_connect_with_dsn(clickhouse_dsn, migration_path):
+async def test_connect_with_dsn(clickhouse_dsn, clickhouse_conn_info, migration_path):
     m = ClickHouseMigrate(
         clickhouse_dsn=clickhouse_dsn,
         migrations_path=migration_path,
     )
-    conn = await m.conn()
-    assert conn.connected
+    r = urlparse(clickhouse_dsn)
+
+    assert m.connection_params["host"] == r.hostname
+    assert m.connection_params["port"] == r.port
+    assert m.connection_params["user"] == r.username
+    assert m.connection_params["password"] == r.password
+    assert m.database == r.path.strip("/")
 
 
 @pytest.mark.asyncio
@@ -50,8 +60,11 @@ async def test_connect_with_conn_info(clickhouse_conn_info, migration_path):
         database=clickhouse_conn_info.DATABASE,
         migrations_path=migration_path,
     )
-    conn = await m.conn()
-    assert conn.connected
+    assert m.connection_params["host"] == clickhouse_conn_info.HOST
+    assert m.connection_params["port"] == clickhouse_conn_info.PORT
+    assert m.connection_params["user"] == clickhouse_conn_info.USERNAME
+    assert m.connection_params["password"] == clickhouse_conn_info.PASSWORD
+    assert m.database == clickhouse_conn_info.DATABASE
 
 
 @pytest.mark.asyncio
@@ -70,7 +83,6 @@ async def test_migrate_make(clickhouse_conn, migration_path):
         migrations_path=migration_path,
     )
     assert isinstance(m, ClickHouseMigrate)
-    assert m._conn == clickhouse_conn
     name = "new_test_migration"
     await m.make(name)
     num = 1
@@ -91,7 +103,6 @@ async def test_migrate_up_down(clickhouse_conn, migration_path):
         migrations_path=migration_path,
     )
     assert isinstance(m, ClickHouseMigrate)
-    assert m._conn == clickhouse_conn
     name = "new_test_migration"
     for num in range(0, 5):
         pathlib.Path(
@@ -121,24 +132,28 @@ async def test_migrate_up_down(clickhouse_conn, migration_path):
         assert len(res) == 0
 
 
-async def get_last_log(m):
-    async with m._conn.cursor(cursor=DictCursor) as cursor:
-        await cursor.execute(
-            f"""SELECT version, name, status, up_md5, down_md5, created_at 
-                FROM `{m.migrations_table}` ORDER BY (created_at) DESC LIMIT 1"""
-        )
-        res = cursor.fetchone()
-        return MigrationRecord(**res)
+@pytest.fixture()
+def get_last_log(clickhouse_dsn):
+    async def _fn(m):
+        conn = await asynch.connect(dsn=clickhouse_dsn)
+        async with conn.cursor(cursor=DictCursor) as cursor:
+            await cursor.execute(
+                f"""SELECT version, name, status, up_md5, down_md5, created_at 
+                    FROM `{m.migrations_table}` ORDER BY (created_at) DESC LIMIT 1"""
+            )
+            res = cursor.fetchone()
+            return MigrationRecord(**res)
+
+    return _fn
 
 
 @pytest.mark.asyncio
-async def test_migrate_up_step(clickhouse_conn, migration_path):
+async def test_migrate_up_step(clickhouse_conn, migration_path, get_last_log):
     m = ClickHouseMigrate(
         clickhouse_conn=clickhouse_conn,
         migrations_path=migration_path,
     )
     assert isinstance(m, ClickHouseMigrate)
-    assert m._conn == clickhouse_conn
     name = "new_test_migration"
     for num in range(0, 5):
         pathlib.Path(
@@ -159,13 +174,12 @@ async def test_migrate_up_step(clickhouse_conn, migration_path):
 
 
 @pytest.mark.asyncio
-async def test_migrate_down_step(clickhouse_conn, migration_path):
+async def test_migrate_down_step(clickhouse_conn, migration_path, get_last_log):
     m = ClickHouseMigrate(
         clickhouse_conn=clickhouse_conn,
         migrations_path=migration_path,
     )
     assert isinstance(m, ClickHouseMigrate)
-    assert m._conn == clickhouse_conn
     name = "new_test_migration"
     for num in range(0, 5):
         pathlib.Path(
@@ -192,13 +206,12 @@ async def test_migrate_down_step(clickhouse_conn, migration_path):
 
 
 @pytest.mark.asyncio
-async def test_migrate_force(clickhouse_conn, migration_path):
+async def test_migrate_force(clickhouse_conn, migration_path, get_last_log):
     m = ClickHouseMigrate(
         clickhouse_conn=clickhouse_conn,
         migrations_path=migration_path,
     )
     assert isinstance(m, ClickHouseMigrate)
-    assert m._conn == clickhouse_conn
     name = "new_test_migration"
     for num in range(0, 5):
         pathlib.Path(
@@ -230,13 +243,12 @@ async def test_migrate_force(clickhouse_conn, migration_path):
 
 
 @pytest.mark.asyncio
-async def test_migrate_reset(clickhouse_conn, migration_path):
+async def test_migrate_reset(clickhouse_conn, migration_path, get_last_log):
     m = ClickHouseMigrate(
         clickhouse_conn=clickhouse_conn,
         migrations_path=migration_path,
     )
     assert isinstance(m, ClickHouseMigrate)
-    assert m._conn == clickhouse_conn
     name = "new_test_migration"
     for num in range(0, 5):
         pathlib.Path(

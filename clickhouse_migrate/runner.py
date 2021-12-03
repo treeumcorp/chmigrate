@@ -1,10 +1,22 @@
 import argparse
 import asyncio
 import os
+import sys
+import logging
 
 from dotenv import dotenv_values
 
 from clickhouse_migrate.migrate import ClickHouseMigrate, Action
+
+
+APP_NAME = "chmigrate"
+
+logger = logging.getLogger(APP_NAME)
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(message)s")
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 
 def check_positive_int(value):
@@ -48,7 +60,7 @@ def get_env(name, default=""):
 async def _run():
     _load_environment_from_file()
 
-    parser = argparse.ArgumentParser("chmigrate")
+    parser = argparse.ArgumentParser(APP_NAME)
     _add_known_args(parser)
 
     parser.add_argument(
@@ -148,6 +160,13 @@ async def _run():
 
     args = parser.parse_args()
 
+    if args.verbose:
+        logging.basicConfig(
+            format="%(asctime)s[%(levelname)s]: %(message)s", level=logging.DEBUG
+        )
+    else:
+        logging.basicConfig(format="%(message)s", level=logging.INFO)
+
     m = ClickHouseMigrate(
         clickhouse_dsn=args.dsn,
         host=args.host,
@@ -158,7 +177,6 @@ async def _run():
         migrations_path=args.migration_path,
         migrations_table=args.migration_table,
         environ={**os.environ},
-        verbose=args.verbose,
         secure=args.secure.lower() == "true",
         ca_certs=args.ca_certs,
     )
@@ -181,8 +199,6 @@ async def _run():
         await m.force(reset=True)
     else:
         parser.print_help()
-
-    await m.close()
 
 
 def run():
