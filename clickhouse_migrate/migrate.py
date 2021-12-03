@@ -1,6 +1,7 @@
 import datetime
 import hashlib
 import os
+import logging
 from pathlib import Path
 from dataclasses import dataclass
 from enum import Enum
@@ -15,9 +16,7 @@ from jinja2 import Environment, FileSystemLoader
 from clickhouse_migrate.utils import remove_suffix
 
 
-class VerboseLevel(Enum):
-    DEBUG = 0
-    INFO = 10
+logger = logging.getLogger(__name__)
 
 
 class MigrationError(Exception):
@@ -35,7 +34,7 @@ def show_migration_error(fn):
         try:
             return fn(*args, **kwargs)
         except MigrationError as e:
-            print(e)
+            logger.error(e)
 
     return wrapped
 
@@ -81,22 +80,22 @@ class MigrationRecord:
 
 
 class ClickHouseMigrate:
-    clickhouse_dsn: str = ""
-    host: str = "localhost"
-    port: int = 9000
+    connection_params = {
+        "host": "localhost",
+        "port": 9000,
+        "username": "default",
+        "password": "",
+        "secure": False,
+        "ca_certs": "",
+    }
     database: str = ""
-    username: str = "default"
-    password: str = ""
+    _is_database_exists = False
     migrations_table: str = "schema_migrations"
     migration_path: str = "migrations"
 
     environ: Dict[str, Any] = {}
 
-    _conn = None
-
     MULTISTATE_SEPARATOR = ";"
-
-    verbose_level: VerboseLevel = VerboseLevel.INFO
 
     def __init__(
         self,
@@ -115,24 +114,48 @@ class ClickHouseMigrate:
         secure: bool = False,
         ca_certs: str = "",
     ):
-        if verbose:
-            self.verbose_level = VerboseLevel.DEBUG
+
         if clickhouse_conn:
-            self._conn = clickhouse_conn
-            self._parse_conn()
+            self.database = clickhouse_conn.database
+            self.connection_params.update(
+                {
+                    "host": clickhouse_conn.host,
+                    "port": clickhouse_conn.port,
+                    "user": clickhouse_conn.user,
+                    "password": clickhouse_conn.password,
+                }
+            )
         elif clickhouse_dsn:
-            self.clickhouse_dsn = clickhouse_dsn
-            self._parse_dsn()
+            r = urlparse(clickhouse_dsn)
+            self.database = r.path.strip("/")
+            self.connection_params.update(
+                {
+                    "host": r.hostname,
+                    "port": r.port,
+                    "user": r.username,
+                    "password": r.password,
+                }
+            )
         elif all([host, port, database, username]):
-            self.host = host
-            self.port = port
             self.database = database
-            self.username = username
-            self.password = password
+            self.connection_params.update(
+                {
+                    "host": host,
+                    "port": port,
+                    "user": username,
+                    "password": password,
+                }
+            )
         else:
             raise RuntimeError("clickhouse connection not configure")
-        self.secure = secure
-        self.ca_certs = ca_certs
+
+        self.connection_params.update(
+            {
+                "secure": secure,
+                "ca_certs": ca_certs,
+            }
+        )
+
         self.migration_path = migrations_path or self.migration_path
         self.migrations_table = migrations_table or self.migrations_table
         self.jinja_env = Environment(
@@ -140,34 +163,20 @@ class ClickHouseMigrate:
         )
         self.environ = environ or {}
 
-    async def close(self):
-        if self._conn:
-            await self._conn.close()
+        logger.debug(f"init params: {self.connection_params}")
 
-    def _parse_conn(self):
-        if self._conn:
-            self.host = self._conn.host
-            self.port = self._conn.port
-            self.username = self._conn.user
-            self.password = self._conn.password
-            self.database = self._conn.database
+    async def _check_database_exist(self):
+        if not self._is_database_exists:
+            conn = await asynch.connect(**self.connection_params)
+            async with conn.cursor() as cursor:
+                await cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{self.database}`")
+                self.is_database_exists = True
 
-    def _parse_dsn(self):
-        if self.clickhouse_dsn:
-            r = urlparse(self.clickhouse_dsn)
-            self.host = r.hostname
-            self.port = r.port
-            self.username = r.username or "default"
-            self.password = r.password or ""
-            self.database = r.path.strip("/")
-
-    def _print(self, msg, **kwargs):
-        if self.verbose_level.value >= VerboseLevel.INFO.value:
-            print(msg, **kwargs)
-
-    def _debug(self, msg, **kwargs):
-        if self.verbose_level.value >= VerboseLevel.DEBUG.value:
-            print(msg, **kwargs)
+    async def _execute(self, query, args=None):
+        conn = await asynch.connect(database=self.database, **self.connection_params)
+        async with conn.cursor(cursor=DictCursor) as cursor:
+            res = await cursor.execute(query, args)
+            return res, cursor.fetchall()
 
     @show_migration_error
     async def make(self, name: str, force: bool = False):
@@ -181,7 +190,7 @@ class ClickHouseMigrate:
         for action in ("up", "down"):
             filename = f"{num:0>5d}_{name}.{action}.sql"
             Path(os.path.join(self.migration_path, filename)).write_text("")
-            self._print(f"create migration {filename}")
+            logger.info(f"create migration {filename}")
 
     @show_migration_error
     async def show(self):
@@ -194,10 +203,10 @@ class ClickHouseMigrate:
         def _cmp_md5(left, right):
             return "valid" if left == right else "invalid"
 
-        self._print(
+        logger.info(
             "version | name                           | status  | up_md5   | down_md5 | created_at"
         )
-        self._print("-" * 102)
+        logger.info("-" * 102)
         file_migrations = self.file_migrations
         for version in sorted(file_migrations.keys()):
             f = file_migrations[version]
@@ -210,13 +219,13 @@ class ClickHouseMigrate:
                 valid_down = _cmp_md5(f.down_md5, d.down_md5)
             else:
                 valid_up = valid_down = "-"
-            self._print(
+            logger.info(
                 f"{f.version:<7d} | {f.name:<30s} | {d.status:<7s} | {valid_up:<8s} | {valid_down:<8s} | {created_at:<30s}"
             )
-        self._print("-" * 102)
+        logger.info("-" * 102)
         version = self.position(db_meta_migrations)
         if version > 0:
-            self._print(
+            logger.info(
                 f"Current apply position version: "
                 f"{file_migrations[version].version} - "
                 f"{file_migrations[version].name}: "
@@ -226,13 +235,13 @@ class ClickHouseMigrate:
     async def show_sql(self, step: int, action: Action = Action.UP):
         file_migrations = self.file_migrations
         if len(file_migrations) < step:
-            print("migration not found")
+            logger.info("migration not found")
         scripts = (
             self._render(file_migrations[step - 1].up_filename)
             if action == Action.UP
             else self._render(file_migrations[step - 1].down_filename)
         )
-        print(scripts)
+        logger.info(scripts)
 
     @show_migration_error
     async def force(self, reset=False):
@@ -297,7 +306,7 @@ class ClickHouseMigrate:
             raise MigrationError(f"Current migration {migrations[-1].status}")
 
     async def _apply_migrate(self, meta: MigrationFiles, action: Action):
-        self._print(f"Migrate {action.name} {meta.name}...", end="")
+        logger.info(f"Start migrate {action.name} {meta.name}")
         await self._log_action(
             version=meta.version,
             name=meta.name,
@@ -324,7 +333,7 @@ class ClickHouseMigrate:
             up_md5=meta.up_md5,
             down_md5=meta.down_md5,
         )
-        self._print("OK")
+        logger.info(f"Start migrate {action.name} {meta.name} - Complete")
 
     def _render(self, filename: str) -> str:
         template = self.jinja_env.get_template(filename)
@@ -347,58 +356,17 @@ class ClickHouseMigrate:
             ],
         )
 
-    async def _check_database_exist(self):
-        self._print("Check database exists")
-        conn = await asynch.connect(
-            host=self.host,
-            port=self.port,
-            user=self.username,
-            password=self.password,
-            secure=self.secure,
-            ca_certs=self.ca_certs,
-        )
-        async with conn.cursor() as cursor:
-            await cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{self.database}`")
-        await conn.close()
-
-    async def conn(self):
-        if not self._conn:
-            await self._check_database_exist()
-            if self.clickhouse_dsn:
-                self._debug(f"Connect to {self.clickhouse_dsn}...", end="")
-                self._conn = await asynch.connect(dsn=self.clickhouse_dsn)
-                self._debug("OK")
-            else:
-                self._debug(f"Connect to {self.host}:{self.port}...", end="")
-                self._conn = await asynch.connect(
-                    host=self.host,
-                    port=self.port,
-                    user=self.username,
-                    password=self.password,
-                    database=self.database,
-                    secure=self.secure,
-                    ca_certs=self.ca_certs,
-                )
-                self._debug("OK")
-        return self._conn
-
-    async def _execute(self, query, args=None):
-        conn = await self.conn()
-        async with conn.cursor(cursor=DictCursor) as cursor:
-            res = await cursor.execute(query, args)
-            return res, cursor.fetchall()
-
     async def _check_migration_table(self):
-        self._print("Migration table exist...", end="")
+        logger.debug("Check migration table")
         _, res = await self._execute(
             f"SHOW TABLES FROM `{self.database}` LIKE '{self.migrations_table}'"
         )
         table_exist = len(res) > 0
-        self._print("OK" if table_exist else "NOT FOUND")
+        logger.debug("Migration table %s", "OK" if table_exist else "NOT FOUND")
         return table_exist
 
     async def _create_migration_table(self):
-        self._print("Create migration table...", end="")
+        logger.debug("Create migration table...")
         query = f"""
             CREATE TABLE IF NOT EXISTS {self.migrations_table} (
                 version UInt32,
@@ -409,9 +377,10 @@ class ClickHouseMigrate:
                 created_at DateTime64(9) DEFAULT now64()
             ) Engine=MergeTree ORDER BY (created_at)"""
         await self._execute(query)
-        self._print("CREATED")
+        logger.debug("Create migration table...CREATED")
 
     async def db_meta_migrations(self) -> List[MigrationRecord]:
+        await self._check_database_exist()
         if not await self._check_migration_table():
             await self._create_migration_table()
         _, res = await self._execute(
