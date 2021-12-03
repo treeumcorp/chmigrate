@@ -88,8 +88,6 @@ async def test_migrate_make(clickhouse_conn, migration_path):
     num = 1
     assert os.path.exists(os.path.join(migration_path, f"{num:0>5d}_{name}.up.sql"))
     assert os.path.exists(os.path.join(migration_path, f"{num:0>5d}_{name}.down.sql"))
-    with pytest.raises(MigrationError):
-        await m.make(name)
     await m.make(name, force=True)
     num += 1
     assert os.path.exists(os.path.join(migration_path, f"{num:0>5d}_{name}.up.sql"))

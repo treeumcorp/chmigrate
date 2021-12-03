@@ -30,11 +30,11 @@ class MigrationError(Exception):
 
 
 def show_migration_error(fn):
-    def wrapped(*args, **kwargs):
+    async def wrapped(*args, **kwargs):
         try:
-            return fn(*args, **kwargs)
-        except MigrationError as e:
-            logger.error(e)
+            return await fn(*args, **kwargs)
+        except Exception as e:
+            logger.error(str(e))
 
     return wrapped
 
@@ -190,15 +190,17 @@ class ClickHouseMigrate:
         for action in ("up", "down"):
             filename = f"{num:0>5d}_{name}.{action}.sql"
             Path(os.path.join(self.migration_path, filename)).write_text("")
-            logger.info(f"create migration {filename}")
+            logger.info(f"created migration {filename}")
 
     @show_migration_error
     async def show(self):
+        logger.debug("Show migrations")
         metadata: Dict[int, MigrationRecord] = {}
         db_meta_migrations = await self.db_meta_migrations()
         for m in db_meta_migrations:
             if m.version not in metadata:
                 metadata[m.version] = m
+        current_version = self.position(db_meta_migrations)
 
         def _cmp_md5(left, right):
             return "valid" if left == right else "invalid"
@@ -211,6 +213,7 @@ class ClickHouseMigrate:
         for version in sorted(file_migrations.keys()):
             f = file_migrations[version]
             d = metadata.get(version) or MigrationRecord(version=version)
+            status = d.status if current_version >= version else "-"
             created_at = d.created_at or "-"
             if created_at != "-":
                 created_at = created_at.isoformat()
@@ -220,19 +223,19 @@ class ClickHouseMigrate:
             else:
                 valid_up = valid_down = "-"
             logger.info(
-                f"{f.version:<7d} | {f.name:<30s} | {d.status:<7s} | {valid_up:<8s} | {valid_down:<8s} | {created_at:<30s}"
+                f"{f.version:<7d} | {f.name:<30s} | {status:<7s} | {valid_up:<8s} | {valid_down:<8s} | {created_at:<30s}"
             )
         logger.info("-" * 102)
-        version = self.position(db_meta_migrations)
-        if version > 0:
+        if current_version > 0:
             logger.info(
                 f"Current apply position version: "
-                f"{file_migrations[version].version} - "
-                f"{file_migrations[version].name}: "
+                f"{file_migrations[current_version].version} - "
+                f"{file_migrations[current_version].name}: "
                 f"{db_meta_migrations[0].status}"
             )
 
     async def show_sql(self, step: int, action: Action = Action.UP):
+        logger.info("Show SQL")
         file_migrations = self.file_migrations
         if len(file_migrations) < step:
             logger.info("migration not found")
@@ -251,6 +254,7 @@ class ClickHouseMigrate:
         if meta[0].status not in [Status.DIRTY_UP, Status.DIRTY_DOWN]:
             raise MigrationError("current migration not dirty")
         if not reset:
+            logger.info("Force apply last migration")
             await self._log_action(
                 version=meta[0].version,
                 name=meta[0].name,
@@ -259,15 +263,25 @@ class ClickHouseMigrate:
                 down_md5=meta[0].down_md5,
             )
         else:
+            logger.info("Reset apply last migration")
             if len(meta) < 2:
-                raise MigrationError("prev migration not found")
-            await self._log_action(
-                version=meta[1].version,
-                name=meta[1].name,
-                status=meta[1].status,
-                up_md5=meta[1].up_md5,
-                down_md5=meta[1].down_md5,
-            )
+                await self._log_action(
+                    version=meta[0].version,
+                    name=meta[0].name,
+                    status=Status.DOWN
+                    if meta[0].status == Status.DIRTY_UP
+                    else Status.UP,
+                    up_md5=meta[0].up_md5,
+                    down_md5=meta[0].down_md5,
+                )
+            else:
+                await self._log_action(
+                    version=meta[1].version,
+                    name=meta[1].name,
+                    status=meta[1].status,
+                    up_md5=meta[1].up_md5,
+                    down_md5=meta[1].down_md5,
+                )
 
     @show_migration_error
     async def up(self, *, step: Optional[int] = None):
