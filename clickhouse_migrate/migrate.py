@@ -206,9 +206,9 @@ class ClickHouseMigrate:
             return "valid" if left == right else "invalid"
 
         logger.info(
-            "version | name                           | status  | up_md5   | down_md5 | created_at"
+            "version | name                           | status     | up_md5   | down_md5 | created_at"
         )
-        logger.info("-" * 102)
+        logger.info("-" * 104)
         file_migrations = self.file_migrations
         for version in sorted(file_migrations.keys()):
             f = file_migrations[version]
@@ -223,9 +223,9 @@ class ClickHouseMigrate:
             else:
                 valid_up = valid_down = "-"
             logger.info(
-                f"{f.version:<7d} | {f.name:<30s} | {status:<7s} | {valid_up:<8s} | {valid_down:<8s} | {created_at:<30s}"
+                f"{f.version:<7d} | {f.name:<30s} | {status:<10s} | {valid_up:<8s} | {valid_down:<8s} | {created_at:<30s}"
             )
-        logger.info("-" * 102)
+        logger.info("-" * 104)
         if current_version > 0:
             logger.info(
                 f"Current apply position version: "
@@ -233,6 +233,30 @@ class ClickHouseMigrate:
                 f"{file_migrations[current_version].name}: "
                 f"{db_meta_migrations[0].status}"
             )
+
+    @show_migration_error
+    async def show_playbook(self):
+        def _cmp_md5(left, right):
+            return "valid" if left == right else "invalid"
+
+        logger.debug("Show playbook")
+        file_migrations = self.file_migrations
+        db_meta_migrations = await self.db_meta_migrations(reverse=False)
+        logger.info(
+            "num | version | name                           | status     | up_md5   | down_md5 | created_at"
+        )
+        logger.info("-" * 110)
+        for i, m in enumerate(db_meta_migrations):
+            f = file_migrations.get(m.version)
+            if f:
+                valid_up = _cmp_md5(f.up_md5, m.up_md5)
+                valid_down = _cmp_md5(f.down_md5, m.down_md5)
+            else:
+                valid_up = valid_down = "lost"
+            logger.info(
+                f"{i+1:<3d} | {m.version:<7d} | {m.name:<30s} | {m.status:<10s} | {valid_up:<8s} | {valid_down:<8s} | {m.created_at.isoformat():<30s}"
+            )
+        logger.info("-" * 110)
 
     async def show_sql(self, step: int, action: Action = Action.UP):
         logger.info("Show SQL")
@@ -393,13 +417,13 @@ class ClickHouseMigrate:
         await self._execute(query)
         logger.debug("Create migration table...CREATED")
 
-    async def db_meta_migrations(self) -> List[MigrationRecord]:
+    async def db_meta_migrations(self, reverse=True) -> List[MigrationRecord]:
         await self._check_database_exist()
         if not await self._check_migration_table():
             await self._create_migration_table()
         _, res = await self._execute(
             f"""SELECT version, name, status, up_md5, down_md5, created_at 
-                FROM `{self.migrations_table}` ORDER BY (created_at) DESC"""
+                FROM `{self.migrations_table}` ORDER BY (created_at) {'DESC' if reverse else 'ASC'}"""
         )
         return [MigrationRecord(**d) for d in res]
 

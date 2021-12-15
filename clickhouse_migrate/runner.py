@@ -42,7 +42,7 @@ ENV_PREFIX = ""
 
 
 def _load_environment_from_file():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(add_help=False)
     _add_known_args(parser)
     args, extra = parser.parse_known_args()
 
@@ -144,6 +144,8 @@ async def _run():
     show_sql.add_argument("step", type=check_positive_int, help="migration step")
     show_sql.add_argument("direction", type=str, help="up|down")
 
+    subparsers.add_parser("playbook", help="show playbook")
+
     parser_up = subparsers.add_parser("up", help="migrate up")
     parser_up.add_argument(
         "step", type=check_positive_int, nargs="?", help="migration step"
@@ -189,6 +191,8 @@ async def _run():
         )
     elif args.subparser_name == "make":
         await m.make(args.name, args.force)
+    elif args.subparser_name == "playbook":
+        await m.show_playbook()
     elif args.subparser_name == "up":
         await m.up(step=args.step)
     elif args.subparser_name == "down":
